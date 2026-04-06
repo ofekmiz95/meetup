@@ -10,18 +10,19 @@ import MembersPanel from "./components/MembersPanel";
 import InviteToast from "./components/InviteToast";
 import TitleBar from "./components/TitleBar";
 import IdleView from "./components/IdleView";
+import WelcomeView from "./components/WelcomeView";
 import ScanningView from "./components/ScanningView";
 import RoomClosingView from "./components/RoomClosingView";
 import type { AppInitData, RoomInvite } from "../shared/types";
 import "./styles/global.css";
 
-type MainView = "idle" | "scanning" | "chat" | "closing";
+type MainView = "welcome" | "idle" | "scanning" | "chat" | "closing";
 
 export default function App() {
   const { room, setSelf, setBleStatus } = useAppStore();
   const [pendingInvite, setPendingInvite] = useState<RoomInvite | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mainView, setMainView] = useState<MainView>("idle");
+  const [mainView, setMainView] = useState<MainView>("welcome");
   const [closingRoom, setClosingRoom] = useState<{ roomId: string; members: any[] } | null>(null);
 
   useBle();
@@ -74,6 +75,23 @@ export default function App() {
     if (room) setPendingInvite(null);
   }, [room]);
 
+  // After 5s on welcome with no peers → show idle ("No nearby users found")
+  useEffect(() => {
+    if (mainView !== "welcome") return;
+    const timer = setTimeout(() => {
+      setMainView((v) => (v === "welcome" ? "idle" : v));
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [mainView]);
+
+  // If a peer is discovered while on welcome → move to idle immediately
+  const { nearbyPeers } = useAppStore();
+  useEffect(() => {
+    if (mainView === "welcome" && nearbyPeers.length > 0) {
+      setMainView("idle");
+    }
+  }, [nearbyPeers, mainView]);
+
   // Expose setMainView so Sidebar's Create Room can trigger scanning
   const handleCreateRoomStart = () => setMainView("scanning");
   const handleClosingDone = () => {
@@ -101,6 +119,7 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
         <Sidebar onCreateRoomStart={handleCreateRoomStart} />
 
+        {mainView === "welcome" && <WelcomeView />}
         {mainView === "idle" && <IdleView />}
         {mainView === "scanning" && <ScanningView />}
         {mainView === "chat" && room && (
