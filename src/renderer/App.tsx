@@ -9,13 +9,17 @@ import ChatArea from "./components/ChatArea";
 import MembersPanel from "./components/MembersPanel";
 import InviteToast from "./components/InviteToast";
 import TitleBar from "./components/TitleBar";
+import ScanningView from "./components/ScanningView";
+import NoRoomsFound from "./components/NoRoomsFound";
+import RoomClosingOverlay from "./components/RoomClosingOverlay";
 import type { AppInitData, RoomInvite } from "../shared/types";
 import "./styles/global.css";
 
 export default function App() {
-  const { room, setSelf, setBleStatus } = useAppStore();
+  const { room, setSelf, setBleStatus, bleStatus, nearbyPeers } = useAppStore();
   const [pendingInvite, setPendingInvite] = useState<RoomInvite | null>(null);
   const [loading, setLoading] = useState(true);
+  const [closingReason, setClosingReason] = useState<string | null>(null);
 
   useBle();
   useRoom();
@@ -34,17 +38,35 @@ export default function App() {
       }
     });
 
+    // Intercept room:closed to show the closing overlay
+    const unsubClosed = api.on("room:closed", (...args) => {
+      const { reason } = args[0] as { reason: string };
+      setClosingReason(reason);
+    });
+
     const unsubError = api.on("app:error", (...args) => {
       const { code, message } = args[0] as { code: string; message: string };
       console.error(`[App Error] ${code}: ${message}`);
     });
 
-    return () => { unsubInvite(); unsubError(); };
+    return () => {
+      unsubInvite();
+      unsubClosed();
+      unsubError();
+    };
   }, [setSelf, setBleStatus]);
 
   useEffect(() => {
-    if (room) setPendingInvite(null);
+    if (room) {
+      setPendingInvite(null);
+      setClosingReason(null);
+    }
   }, [room]);
+
+  // Determine which main view to show
+  const isScanning = !room && (bleStatus === "initializing" || nearbyPeers.length === 0);
+  const hasRooms = nearbyPeers.some((p) => p.hasRoom);
+  const showNoRooms = !room && !isScanning && nearbyPeers.length > 0 && !hasRooms;
 
   if (loading) {
     return (
@@ -61,18 +83,35 @@ export default function App() {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--bg-base)" }}>
       <TitleBar />
+
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
         <Sidebar />
+
+        {/* Main content area */}
         {room ? (
           <>
             <ChatArea />
             <MembersPanel />
           </>
+        ) : isScanning ? (
+          <ScanningView />
+        ) : showNoRooms ? (
+          <NoRoomsFound />
         ) : (
           <EmptyState />
         )}
+
+        {/* Invite toast */}
         {pendingInvite && !room && (
           <InviteToast invite={pendingInvite} onDismiss={() => setPendingInvite(null)} />
+        )}
+
+        {/* Room closing overlay — shown over the chat area */}
+        {closingReason && room && (
+          <RoomClosingOverlay
+            reason={closingReason}
+            onDone={() => setClosingReason(null)}
+          />
         )}
       </div>
     </div>
@@ -81,7 +120,7 @@ export default function App() {
 
 function EmptyState() {
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--text-muted)" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--text-muted)", background: "var(--bg-base)" }}>
       <div
         style={{
           width: 64,
