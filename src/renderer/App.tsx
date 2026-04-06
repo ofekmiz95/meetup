@@ -9,17 +9,20 @@ import ChatArea from "./components/ChatArea";
 import MembersPanel from "./components/MembersPanel";
 import InviteToast from "./components/InviteToast";
 import TitleBar from "./components/TitleBar";
+import IdleView from "./components/IdleView";
 import ScanningView from "./components/ScanningView";
-import NoRoomsFound from "./components/NoRoomsFound";
-import RoomClosingOverlay from "./components/RoomClosingOverlay";
+import RoomClosingView from "./components/RoomClosingView";
 import type { AppInitData, RoomInvite } from "../shared/types";
 import "./styles/global.css";
 
+type MainView = "idle" | "scanning" | "chat" | "closing";
+
 export default function App() {
-  const { room, setSelf, setBleStatus, bleStatus, nearbyPeers } = useAppStore();
+  const { room, setSelf, setBleStatus } = useAppStore();
   const [pendingInvite, setPendingInvite] = useState<RoomInvite | null>(null);
   const [loading, setLoading] = useState(true);
-  const [closingReason, setClosingReason] = useState<string | null>(null);
+  const [mainView, setMainView] = useState<MainView>("idle");
+  const [closingRoom, setClosingRoom] = useState<{ roomId: string; members: any[] } | null>(null);
 
   useBle();
   useRoom();
@@ -38,10 +41,19 @@ export default function App() {
       }
     });
 
-    // Intercept room:closed to show the closing overlay
+    // Room created/joined → go to chat
+    const unsubCreated = api.on("room:created", () => setMainView("chat"));
+    const unsubJoined = api.on("room:joined", () => setMainView("chat"));
+
+    // Room closed → show closing view, then idle
     const unsubClosed = api.on("room:closed", (...args) => {
       const { reason } = args[0] as { reason: string };
-      setClosingReason(reason);
+      const state = useAppStore.getState();
+      setClosingRoom({
+        roomId: state.room?.roomId ?? "",
+        members: state.room?.members ?? [],
+      });
+      setMainView("closing");
     });
 
     const unsubError = api.on("app:error", (...args) => {
@@ -51,22 +63,23 @@ export default function App() {
 
     return () => {
       unsubInvite();
+      unsubCreated();
+      unsubJoined();
       unsubClosed();
       unsubError();
     };
   }, [setSelf, setBleStatus]);
 
   useEffect(() => {
-    if (room) {
-      setPendingInvite(null);
-      setClosingReason(null);
-    }
+    if (room) setPendingInvite(null);
   }, [room]);
 
-  // Determine which main view to show
-  const isScanning = !room && (bleStatus === "initializing" || nearbyPeers.length === 0);
-  const hasRooms = nearbyPeers.some((p) => p.hasRoom);
-  const showNoRooms = !room && !isScanning && nearbyPeers.length > 0 && !hasRooms;
+  // Expose setMainView so Sidebar's Create Room can trigger scanning
+  const handleCreateRoomStart = () => setMainView("scanning");
+  const handleClosingDone = () => {
+    setClosingRoom(null);
+    setMainView("idle");
+  };
 
   if (loading) {
     return (
@@ -80,37 +93,33 @@ export default function App() {
     );
   }
 
+  const showMembersPanel = mainView === "chat" || mainView === "closing";
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "var(--bg-base)" }}>
       <TitleBar />
-
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
-        <Sidebar />
+        <Sidebar onCreateRoomStart={handleCreateRoomStart} />
 
-        {/* Main content area */}
-        {room ? (
+        {mainView === "idle" && <IdleView />}
+        {mainView === "scanning" && <ScanningView />}
+        {mainView === "chat" && room && (
           <>
             <ChatArea />
             <MembersPanel />
           </>
-        ) : isScanning ? (
-          <ScanningView />
-        ) : showNoRooms ? (
-          <NoRoomsFound />
-        ) : (
-          <EmptyState />
+        )}
+        {mainView === "closing" && (
+          <>
+            <RoomClosingView onDone={handleClosingDone} />
+            {closingRoom && <ClosingMembersPanel members={closingRoom.members} />}
+          </>
         )}
 
-        {/* Invite toast */}
-        {pendingInvite && !room && (
-          <InviteToast invite={pendingInvite} onDismiss={() => setPendingInvite(null)} />
-        )}
-
-        {/* Room closing overlay — shown over the chat area */}
-        {closingReason && room && (
-          <RoomClosingOverlay
-            reason={closingReason}
-            onDone={() => setClosingReason(null)}
+        {pendingInvite && mainView === "idle" && (
+          <InviteToast
+            invite={pendingInvite}
+            onDismiss={() => setPendingInvite(null)}
           />
         )}
       </div>
@@ -118,29 +127,48 @@ export default function App() {
   );
 }
 
-function EmptyState() {
+// Frozen snapshot of members shown during room closing
+function ClosingMembersPanel({ members }: { members: any[] }) {
+  const { selfPeerId } = useAppStore();
+  const self = members.find((m) => m.peerId === selfPeerId) ?? { displayName: "You", peerId: selfPeerId };
+
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--text-muted)", background: "var(--bg-base)" }}>
+    <div
+      style={{
+        width: "var(--members-width)",
+        borderLeft: "1px solid var(--border)",
+        background: "var(--bg-sidebar)",
+        display: "flex",
+        flexDirection: "column",
+        flexShrink: 0,
+      }}
+    >
       <div
         style={{
-          width: 64,
-          height: 64,
-          borderRadius: 18,
-          background: "var(--accent-dim)",
-          border: "1.5px solid var(--accent-border)",
+          padding: "0 16px",
+          height: 58,
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 4,
+          justifyContent: "space-between",
+          borderBottom: "1px solid var(--border)",
         }}
       >
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <path d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z" stroke="var(--accent-light)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>In This Room</span>
+        <span style={{ fontSize: 12, color: "var(--text-muted)", background: "var(--bg-elevated)", padding: "2px 8px", borderRadius: 99 }}>1</span>
       </div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-secondary)" }}>No active room</div>
-      <div style={{ fontSize: 13, textAlign: "center", maxWidth: 240, lineHeight: 1.6 }}>
-        Click <strong style={{ color: "var(--accent-light)" }}>Create Room</strong> to start a proximity chat with nearby people
+      <div style={{ padding: "10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, background: "var(--accent-dim)" }}>
+          <div style={{ position: "relative" }}>
+            <div style={{ width: 34, height: 34, borderRadius: "50%", background: "var(--bg-elevated)", border: "1.5px solid var(--accent-border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "var(--accent-light)" }}>
+              {self.displayName[0]?.toUpperCase() ?? "Y"}
+            </div>
+            <div style={{ position: "absolute", bottom: 0, right: 0, width: 9, height: 9, borderRadius: "50%", background: "var(--online)", border: "2px solid var(--bg-sidebar)" }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500 }}>You</div>
+            <div style={{ fontSize: 11, color: "var(--online)" }}>Active</div>
+          </div>
+        </div>
       </div>
     </div>
   );

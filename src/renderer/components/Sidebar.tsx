@@ -110,18 +110,22 @@ function DeviceCard({ peer }: { peer: Peer }) {
   );
 }
 
-export default function Sidebar() {
+interface SidebarProps {
+  onCreateRoomStart?: () => void;
+}
+
+export default function Sidebar({ onCreateRoomStart }: SidebarProps) {
   const { nearbyPeers, bleStatus, room } = useAppStore();
   const [creating, setCreating] = useState(false);
 
   const handleCreateRoom = async () => {
     if (creating || room) return;
     setCreating(true);
+    onCreateRoomStart?.();
     try {
       await api.invoke("room:create");
     } catch (err) {
       console.error("Failed to create room:", err);
-    } finally {
       setCreating(false);
     }
   };
