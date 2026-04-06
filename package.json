@@ -1,0 +1,42 @@
+{
+  "name": "meetup",
+  "version": "1.0.0",
+  "description": "Proximity-based ephemeral chat for nearby devices",
+  "main": "dist-electron/main/index.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .\"",
+    "build:renderer": "vite build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build": "npm run build:renderer && npm run build:main",
+    "package": "npm run build && electron-builder",
+    "postinstall": "electron-rebuild -f -w @abandonware/noble"
+  },
+  "keywords": ["proximity", "chat", "bluetooth", "electron"],
+  "author": "Meetup",
+  "license": "MIT",
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-26",
+    "electron-log": "^5.2.4",
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.30",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.2",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.14",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^35.1.2",
+    "electron-builder": "^26.0.12",
+    "electron-rebuild": "^3.2.9",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.2.6",
+    "wait-on": "^8.0.3",
+    "zustand": "^5.0.3"
+  }
+}
