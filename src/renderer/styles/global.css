@@ -5,22 +5,31 @@
 }
 
 :root {
-  --bg-base: #0f0f13;
-  --bg-surface: #18181f;
-  --bg-elevated: #22222d;
-  --bg-hover: #2a2a38;
-  --accent: #7c6af7;
-  --accent-hover: #9183f9;
-  --accent-dim: rgba(124, 106, 247, 0.15);
-  --text-primary: #e8e8f0;
-  --text-secondary: #8888a0;
-  --text-muted: #5a5a70;
-  --border: rgba(255,255,255,0.07);
-  --danger: #e05252;
-  --success: #52c27a;
-  --radius: 10px;
-  --radius-sm: 6px;
-  font-size: 14px;
+  --bg-base: #0d0d0d;
+  --bg-sidebar: #141414;
+  --bg-surface: #1a1a1a;
+  --bg-elevated: #222222;
+  --bg-hover: #2a2a2a;
+  --bg-input: #1e1e1e;
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-light: #8b5cf6;
+  --accent-dim: rgba(124, 58, 237, 0.15);
+  --accent-border: rgba(124, 58, 237, 0.3);
+  --text-primary: #f0f0f0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #606060;
+  --border: rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.1);
+  --danger: #dc2626;
+  --danger-dim: rgba(220, 38, 38, 0.15);
+  --success: #22c55e;
+  --online: #22c55e;
+  --sidebar-width: 260px;
+  --members-width: 220px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
 }
 
 html, body, #root {
@@ -34,21 +43,14 @@ body {
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  font-size: 14px;
   user-select: none;
 }
 
-::-webkit-scrollbar {
-  width: 4px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--bg-elevated);
-  border-radius: 2px;
-}
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--bg-hover); }
 
 button {
   cursor: pointer;
@@ -56,12 +58,11 @@ button {
   outline: none;
   font-family: inherit;
   font-size: inherit;
-  transition: opacity 0.15s, background 0.15s, transform 0.1s;
+  transition: background 0.15s, color 0.15s, opacity 0.15s, transform 0.1s;
 }
 
-button:active {
-  transform: scale(0.97);
-}
+button:active { transform: scale(0.97); }
+button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
 input {
   outline: none;
@@ -71,3 +72,7 @@ input {
   background: transparent;
   color: inherit;
 }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }

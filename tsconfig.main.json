@@ -7,7 +7,7 @@
     "outDir": "dist-electron",
     "jsx": "react-jsx",
     "paths": {
-      "@shared/*": ["src/shared/*"]
+      "@shared/*": ["./src/shared/*"]
     }
   },
   "include": ["src/main/**/*", "preload/**/*", "src/shared/**/*"]

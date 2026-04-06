@@ -1,29 +1,35 @@
 import { create } from "zustand";
 import type { BleStatus, Message, Peer } from "../../shared/types";
 
+export interface SystemMessage {
+  id: string;
+  type: "system";
+  text: string;
+  timestamp: number;
+}
+
+export type ChatEntry = Message | SystemMessage;
+
+export function isSystemMessage(entry: ChatEntry): entry is SystemMessage {
+  return (entry as SystemMessage).type === "system";
+}
+
 interface RoomState {
   roomId: string;
   hostPeerId: string;
   members: Peer[];
   isHost: boolean;
+  createdAt: number;
 }
 
 interface AppState {
-  // Self
   selfPeerId: string;
   selfDisplayName: string;
   bleStatus: BleStatus;
-
-  // Discovery
   nearbyPeers: Peer[];
-
-  // Room
   room: RoomState | null;
+  messages: ChatEntry[];
 
-  // Chat
-  messages: Message[];
-
-  // Actions
   setSelf: (peerId: string, displayName: string) => void;
   setBleStatus: (status: BleStatus) => void;
   addNearbyPeer: (peer: Peer) => void;
@@ -31,8 +37,11 @@ interface AppState {
   setRoom: (room: RoomState | null) => void;
   updateRoomMembers: (members: Peer[], hostPeerId: string) => void;
   addMessage: (message: Message) => void;
+  addSystemMessage: (text: string) => void;
   clearMessages: () => void;
 }
+
+let systemMsgCounter = 0;
 
 export const useAppStore = create<AppState>((set) => ({
   selfPeerId: "",
@@ -49,12 +58,10 @@ export const useAppStore = create<AppState>((set) => ({
 
   addNearbyPeer: (peer) =>
     set((state) => {
-      const existing = state.nearbyPeers.findIndex(
-        (p) => p.peerId === peer.peerId
-      );
-      if (existing >= 0) {
+      const idx = state.nearbyPeers.findIndex((p) => p.peerId === peer.peerId);
+      if (idx >= 0) {
         const updated = [...state.nearbyPeers];
-        updated[existing] = peer;
+        updated[idx] = peer;
         return { nearbyPeers: updated };
       }
       return { nearbyPeers: [...state.nearbyPeers, peer] };
@@ -69,13 +76,24 @@ export const useAppStore = create<AppState>((set) => ({
 
   updateRoomMembers: (members, hostPeerId) =>
     set((state) => ({
-      room: state.room
-        ? { ...state.room, members, hostPeerId }
-        : null,
+      room: state.room ? { ...state.room, members, hostPeerId } : null,
     })),
 
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
+
+  addSystemMessage: (text) =>
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        {
+          id: `sys-${++systemMsgCounter}`,
+          type: "system",
+          text,
+          timestamp: Date.now(),
+        } as SystemMessage,
+      ],
+    })),
 
   clearMessages: () => set({ messages: [] }),
 }));

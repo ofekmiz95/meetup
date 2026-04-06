@@ -23,6 +23,6 @@ module.exports = {
     allowToChangeInstallationDirectory: true,
   },
   extraMetadata: {
-    main: "dist-electron/main/index.js",
+    main: "dist-electron/src/main/index.js",
   },
 };
