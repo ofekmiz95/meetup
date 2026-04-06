@@ -1,6 +1,10 @@
 import React from "react";
 
 export default function IdleView() {
+  const handleScan = () => {
+    (window as any).electronAPI?.invoke("ble:start-scan");
+  };
+
   return (
     <div
       style={{
@@ -121,10 +125,28 @@ export default function IdleView() {
             textAlign: "center",
             lineHeight: 1.7,
             maxWidth: 320,
+            marginBottom: 24,
           }}
         >
           Make sure Bluetooth is enabled and others are nearby with the app open.
         </div>
+
+        <button
+          onClick={handleScan}
+          style={{
+            padding: "8px 22px",
+            borderRadius: 8,
+            border: "1px solid var(--border-strong)",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            letterSpacing: 0.2,
+          }}
+        >
+          Scan for Rooms
+        </button>
       </div>
     </div>
   );

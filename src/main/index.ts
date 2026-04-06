@@ -24,7 +24,7 @@ let mainWindow: BrowserWindow | null = null;
 const bleManager = new BleManager({
   peerId: selfPeer.peerId,
   displayName: selfPeer.displayName,
-  localIp: selfPeer.ip,
+  localIp: selfPeer.ip ?? "",
 });
 const roomManager = new RoomManager();
 
@@ -71,21 +71,33 @@ app.whenReady().then(async () => {
 
   registerAllHandlers(mainWindow, bleManager, roomManager, selfPeer);
 
-  // Handle app:ready from renderer
+  // Handle app:ready from renderer — BLE does NOT auto-start
   ipcMain.handle("app:ready", async () => {
-    const bleStatus = await bleManager.init();
+    logger.info(`[Main] App ready. PeerId: ${selfPeer.peerId}`);
 
-    // Forward BLE events to renderer
+    return {
+      selfPeerId: selfPeer.peerId,
+      selfDisplayName: selfPeer.displayName,
+      bleStatus: "idle" as const,
+    };
+  });
+
+  // Explicit scan trigger from renderer (e.g. "Scan for Rooms" button)
+  ipcMain.handle("ble:start-scan", async () => {
+    const status = await bleManager.init();
+
+    // Attach peer event forwarding after init (only once)
+    bleManager.removeAllListeners("peer-discovered");
+    bleManager.removeAllListeners("peer-lost");
+
     bleManager.on("peer-discovered", (peer) => {
       mainWindow?.webContents.send("ble:peer-discovered", peer);
 
       // If peer has a room open and we're not in one, send invite
       if (peer.hasRoom && !roomManager.getActiveRoom()) {
         mainWindow?.webContents.send("room:invite-received", {
-          roomId: `${peer.peerId}-room`,
+          roomId: peer.roomId ?? `${peer.peerId}-room`,
           hostPeerId: peer.peerId,
-          hostIp: peer.ip,
-          hostPort: peer.wsPort,
           hostDisplayName: peer.displayName,
         });
       }
@@ -95,13 +107,10 @@ app.whenReady().then(async () => {
       mainWindow?.webContents.send("ble:peer-lost", { peerId });
     });
 
-    logger.info(`[Main] App ready. PeerId: ${selfPeer.peerId}`);
+    await bleManager.startScanning();
 
-    return {
-      selfPeerId: selfPeer.peerId,
-      selfDisplayName: selfPeer.displayName,
-      bleStatus,
-    };
+    logger.info(`[Main] BLE scan started. Status: ${status}`);
+    return { bleStatus: status };
   });
 
   // Window controls

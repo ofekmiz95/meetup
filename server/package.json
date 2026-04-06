@@ -1,0 +1,13 @@
+{
+  "name": "meetup-relay",
+  "version": "1.0.0",
+  "description": "Meetup WebSocket relay server",
+  "main": "relay.js",
+  "scripts": {
+    "start": "node relay.js"
+  },
+  "dependencies": {
+    "uuid": "^10.0.0",
+    "ws": "^8.18.0"
+  }
+}

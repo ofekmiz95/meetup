@@ -1,11 +1,12 @@
 export interface Peer {
   peerId: string;
   displayName: string;
-  ip: string;
-  wsPort: number;
+  ip?: string;
+  wsPort?: number;
   rssi?: number;
   isHost: boolean;
   hasRoom?: boolean;
+  roomId?: string;
 }
 
 export interface Message {
@@ -32,6 +33,7 @@ export interface AppInitData {
 }
 
 export type BleStatus =
+  | "idle"
   | "initializing"
   | "scanning"
   | "unavailable"
@@ -64,8 +66,8 @@ export interface WsMessage {
 export interface RoomInvite {
   roomId: string;
   hostPeerId: string;
-  hostIp: string;
-  hostPort: number;
+  hostIp?: string;
+  hostPort?: number;
   hostDisplayName: string;
 }
 

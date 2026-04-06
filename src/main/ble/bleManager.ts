@@ -1,6 +1,5 @@
 import { EventEmitter } from "events";
 import dgram from "dgram";
-import os from "os";
 import { BleScanner, DiscoveredPeer } from "./bleScanner";
 import { encodePayload } from "./bleCodec";
 import { logger } from "../utils/logger";
@@ -11,10 +10,12 @@ import {
 } from "./bleConstants";
 import type { BleStatus } from "../../shared/types";
 
+export type { DiscoveredPeer };
+
 interface BleManagerOptions {
   peerId: string;
   displayName: string;
-  localIp: string;
+  localIp: string; // kept for constructor compat but unused for chat
 }
 
 export class BleManager extends EventEmitter {
@@ -23,10 +24,11 @@ export class BleManager extends EventEmitter {
   private udpSocket: dgram.Socket | null = null;
   private udpAdvertiseTimer: NodeJS.Timeout | null = null;
   private options: BleManagerOptions;
-  private wsPort = 0;
+  private roomId = "";
   private hasRoom = false;
   private usingUdpFallback = false;
-  private status: BleStatus = "initializing";
+  private initialized = false;
+  private status: BleStatus = "idle";
 
   constructor(options: BleManagerOptions) {
     super();
@@ -34,6 +36,8 @@ export class BleManager extends EventEmitter {
   }
 
   async init(): Promise<BleStatus> {
+    if (this.initialized) return this.status;
+
     try {
       // Dynamically require noble to catch native module errors gracefully
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -70,30 +74,66 @@ export class BleManager extends EventEmitter {
       this.scanner.on("peer-lost", (peerId: string) =>
         this.emit("peer-lost", peerId)
       );
-      this.scanner.start();
 
+      this.initialized = true;
       this.status = "scanning";
       logger.info("[BleManager] BLE initialized successfully");
     } catch (err) {
       logger.warn("[BleManager] BLE unavailable, falling back to UDP", err);
       this.usingUdpFallback = true;
-      this.startUdpDiscovery();
+      this.initialized = true;
       this.status = "udp-fallback";
     }
 
     return this.status;
   }
 
-  setRoomState(wsPort: number, hasRoom: boolean) {
-    this.wsPort = wsPort;
+  async startScanning(): Promise<void> {
+    if (!this.initialized) {
+      await this.init();
+    }
+
+    if (this.usingUdpFallback) {
+      if (!this.udpSocket) {
+        this.startUdpDiscovery();
+      }
+      return;
+    }
+
+    if (this.scanner) {
+      this.scanner.start();
+    }
+  }
+
+  stopScanning(): void {
+    if (this.scanner) {
+      this.scanner.stop();
+    }
+
+    if (this.udpAdvertiseTimer) {
+      clearInterval(this.udpAdvertiseTimer);
+      this.udpAdvertiseTimer = null;
+    }
+
+    if (this.udpSocket) {
+      try {
+        this.udpSocket.close();
+      } catch (_) {}
+      this.udpSocket = null;
+    }
+
+    logger.info("[BleManager] Scanning stopped");
+  }
+
+  setRoomState(roomId: string, hasRoom: boolean) {
+    this.roomId = roomId;
     this.hasRoom = hasRoom;
   }
 
   private getPayloadBuffer(): Buffer {
     return encodePayload({
       peerId: this.options.peerId,
-      ip: this.options.localIp,
-      wsPort: this.wsPort,
+      roomId: this.roomId,
       hasRoom: this.hasRoom,
     });
   }
@@ -101,19 +141,16 @@ export class BleManager extends EventEmitter {
   private startUdpDiscovery() {
     this.udpSocket = dgram.createSocket({ type: "udp4", reuseAddr: true });
 
-    this.udpSocket.on("message", (msg, rinfo) => {
+    this.udpSocket.on("message", (msg) => {
       try {
-        if (msg.length < 15) return;
-        if (rinfo.address === this.options.localIp) return; // ignore self
-
         const data = JSON.parse(msg.toString());
         if (data.appId !== "meetup-proximity-v1") return;
+        if (data.peerId === this.options.peerId) return; // ignore self
 
         const peer: DiscoveredPeer = {
           peerId: data.peerId,
           displayName: data.displayName,
-          ip: rinfo.address,
-          wsPort: data.wsPort,
+          roomId: data.hasRoom ? data.roomId : undefined,
           hasRoom: data.hasRoom,
           rssi: -70, // simulated
         };
@@ -139,7 +176,7 @@ export class BleManager extends EventEmitter {
         appId: "meetup-proximity-v1",
         peerId: this.options.peerId,
         displayName: this.options.displayName,
-        wsPort: this.wsPort,
+        roomId: this.roomId,
         hasRoom: this.hasRoom,
       });
 
@@ -158,13 +195,7 @@ export class BleManager extends EventEmitter {
   }
 
   destroy() {
-    if (this.scanner) this.scanner.stop();
-    if (this.udpAdvertiseTimer) clearInterval(this.udpAdvertiseTimer);
-    if (this.udpSocket) {
-      try {
-        this.udpSocket.close();
-      } catch (_) {}
-    }
+    this.stopScanning();
     logger.info("[BleManager] Destroyed");
   }
 }

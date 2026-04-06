@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from "electron";
 const INVOKE_CHANNELS = [
   "app:ready",
   "ble:get-status",
+  "ble:start-scan",
   "room:create",
   "room:join",
   "room:leave",

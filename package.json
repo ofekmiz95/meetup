@@ -9,6 +9,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build": "npm run build:renderer && npm run build:main",
     "package": "npm run build && electron-builder",
+    "relay": "node server/relay.js",
     "rebuild:native": "electron-rebuild -f -w @abandonware/noble",
     "postinstall": "npm run rebuild:native || echo \"Skipped native rebuild (run on Node 20+ for BLE support)\""
   },

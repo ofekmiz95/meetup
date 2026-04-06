@@ -6,8 +6,7 @@ import { BLE_SERVICE_UUID } from "./bleConstants";
 export interface DiscoveredPeer {
   peerId: string;
   displayName: string;
-  ip: string;
-  wsPort: number;
+  roomId?: string;
   hasRoom: boolean;
   rssi: number;
 }
@@ -47,8 +46,7 @@ export class BleScanner extends EventEmitter {
       const peer: DiscoveredPeer = {
         peerId: decoded.peerId,
         displayName: decoded.displayName,
-        ip: decoded.ip,
-        wsPort: decoded.wsPort,
+        roomId: decoded.hasRoom ? decoded.roomId : undefined,
         hasRoom: decoded.hasRoom,
         rssi,
       };

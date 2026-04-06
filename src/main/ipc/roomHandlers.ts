@@ -1,94 +1,107 @@
 import { ipcMain, BrowserWindow } from "electron";
+import { v4 as uuidv4 } from "uuid";
 import type { RoomManager } from "../room/roomManager";
-import type { WsServer } from "../network/wsServer";
-import type { WsClient } from "../network/wsClient";
 import type { BleManager } from "../ble/bleManager";
 import type { Peer } from "../../shared/types";
-import { WsClient as WsClientClass } from "../network/wsClient";
+import { relayClient } from "../network/relayClient";
 import { logger } from "../utils/logger";
 
 interface RoomContext {
   roomManager: RoomManager;
-  wsServer: WsServer | null;
-  wsClient: WsClient | null;
   bleManager: BleManager;
   selfPeer: Peer;
   mainWindow: BrowserWindow;
-  setWsServer: (s: WsServer | null) => void;
-  setWsClient: (c: WsClient | null) => void;
+}
+
+function wireRelayEvents(roomId: string, roomManager: RoomManager, mainWindow: BrowserWindow) {
+  // Remove old listeners to avoid duplicate handlers on repeated room joins
+  relayClient.removeAllListeners("message");
+  relayClient.removeAllListeners("member-joined");
+  relayClient.removeAllListeners("member-left");
+  relayClient.removeAllListeners("disconnected");
+
+  relayClient.on("message", (msg: any) => {
+    mainWindow.webContents.send("chat:message-received", {
+      peerId: msg.peerId,
+      displayName: msg.displayName,
+      text: msg.text,
+      timestamp: msg.timestamp,
+      messageId: msg.messageId,
+    });
+  });
+
+  relayClient.on("member-joined", (msg: any) => {
+    const activeRoom = roomManager.getActiveRoom();
+    if (!activeRoom) return;
+
+    roomManager.addMember(activeRoom.roomId, {
+      peerId: msg.peerId,
+      displayName: msg.displayName ?? "Unknown",
+      isHost: false,
+    });
+
+    mainWindow.webContents.send("room:state-updated", {
+      roomId: activeRoom.roomId,
+      members: roomManager.getRoomMembers(activeRoom.roomId),
+      hostPeerId: activeRoom.hostPeerId,
+    });
+  });
+
+  relayClient.on("member-left", (msg: any) => {
+    const activeRoom = roomManager.getActiveRoom();
+    if (!activeRoom) return;
+
+    const { empty } = roomManager.removeMember(activeRoom.roomId, msg.peerId);
+
+    mainWindow.webContents.send("room:state-updated", {
+      roomId: activeRoom.roomId,
+      members: roomManager.getRoomMembers(activeRoom.roomId),
+      hostPeerId: activeRoom.hostPeerId,
+    });
+
+    if (empty) {
+      roomManager.destroyRoom(activeRoom.roomId);
+      mainWindow.webContents.send("room:closed", {
+        roomId: activeRoom.roomId,
+        reason: "empty",
+      });
+    }
+  });
+
+  relayClient.on("disconnected", () => {
+    const activeRoom = roomManager.getActiveRoom();
+    if (activeRoom) {
+      roomManager.destroyRoom(activeRoom.roomId);
+      mainWindow.webContents.send("room:closed", {
+        roomId: activeRoom.roomId,
+        reason: "host-disconnected",
+      });
+    }
+  });
 }
 
 export function registerRoomHandlers(ctx: RoomContext) {
-  const {
-    roomManager,
-    bleManager,
-    selfPeer,
-    mainWindow,
-    setWsServer,
-    setWsClient,
-  } = ctx;
+  const { roomManager, bleManager, selfPeer, mainWindow } = ctx;
 
   ipcMain.handle("room:create", async () => {
-    const { WsServer: WsServerClass } = await import("../network/wsServer");
-    const server = new WsServerClass();
-
     try {
-      const port = await server.start();
-      setWsServer(server);
+      const roomId = uuidv4();
 
-      const hostPeer: Peer = { ...selfPeer, isHost: true, wsPort: port };
-      const room = roomManager.createRoom(hostPeer, port);
+      await bleManager.startScanning();
+      bleManager.setRoomState(roomId, true);
 
-      bleManager.setRoomState(port, true);
+      await relayClient.createRoom(roomId, selfPeer.peerId, selfPeer.displayName);
 
-      server.on("member-joined", ({ peerId, displayName }) => {
-        roomManager.addMember(room.roomId, {
-          peerId,
-          displayName,
-          ip: "",
-          wsPort: 0,
-          isHost: false,
-        });
-        mainWindow.webContents.send("room:state-updated", {
-          roomId: room.roomId,
-          members: roomManager.getRoomMembers(room.roomId),
-          hostPeerId: room.hostPeerId,
-        });
-      });
+      const hostPeer: Peer = { ...selfPeer, isHost: true };
+      const room = roomManager.createRoom(hostPeer, 0);
 
-      server.on("member-left", (peerId: string) => {
-        const { empty } = roomManager.removeMember(room.roomId, peerId);
-        mainWindow.webContents.send("room:state-updated", {
-          roomId: room.roomId,
-          members: roomManager.getRoomMembers(room.roomId),
-          hostPeerId: room.hostPeerId,
-        });
-        if (empty) {
-          server.close();
-          setWsServer(null);
-          roomManager.destroyRoom(room.roomId);
-          bleManager.setRoomState(0, false);
-          mainWindow.webContents.send("room:closed", {
-            roomId: room.roomId,
-            reason: "empty",
-          });
-        }
-      });
-
-      server.on("message", (msg) => {
-        mainWindow.webContents.send("chat:message-received", {
-          peerId: msg.peerId,
-          displayName: msg.displayName,
-          text: msg.text,
-          timestamp: msg.timestamp,
-          messageId: msg.messageId,
-        });
-      });
+      wireRelayEvents(room.roomId, roomManager, mainWindow);
 
       logger.info(`[RoomHandlers] Room created: ${room.roomId}`);
-      return { roomId: room.roomId, wsPort: port };
+      mainWindow.webContents.send("room:created", { roomId: room.roomId });
+
+      return { roomId: room.roomId };
     } catch (err) {
-      server.close();
       logger.error("[RoomHandlers] Failed to create room", err);
       throw err;
     }
@@ -101,98 +114,36 @@ export function registerRoomHandlers(ctx: RoomContext) {
       {
         roomId,
         hostPeerId,
-        hostIp,
-        hostPort,
         hostDisplayName,
       }: {
         roomId: string;
         hostPeerId: string;
-        hostIp: string;
-        hostPort: number;
         hostDisplayName: string;
+        // legacy fields - no longer used for connection but kept for compat
+        hostIp?: string;
+        hostPort?: number;
       }
     ) => {
-      const client = new WsClientClass(selfPeer, roomId);
-      setWsClient(client);
-
-      client.on("message", (msg) => {
-        if (msg.type === "message") {
-          mainWindow.webContents.send("chat:message-received", {
-            peerId: msg.peerId,
-            displayName: msg.displayName,
-            text: msg.text,
-            timestamp: msg.timestamp,
-            messageId: msg.messageId,
-          });
-        }
-
-        if (msg.type === "member-joined" || msg.type === "member-left") {
-          const activeRoom = roomManager.getActiveRoom();
-          if (activeRoom) {
-            if (msg.type === "member-joined" && msg.peerId) {
-              roomManager.addMember(activeRoom.roomId, {
-                peerId: msg.peerId,
-                displayName: msg.displayName ?? "Unknown",
-                ip: "",
-                wsPort: 0,
-                isHost: false,
-              });
-            } else if (msg.type === "member-left" && msg.peerId) {
-              roomManager.removeMember(activeRoom.roomId, msg.peerId);
-            }
-            mainWindow.webContents.send("room:state-updated", {
-              roomId: activeRoom.roomId,
-              members: roomManager.getRoomMembers(activeRoom.roomId),
-              hostPeerId: activeRoom.hostPeerId,
-            });
-          }
-        }
-
-        if (msg.type === "host-migrating" && msg.nextHostPeerId) {
-          const activeRoom = roomManager.getActiveRoom();
-          if (activeRoom) {
-            roomManager.updateHost(activeRoom.roomId, msg.nextHostPeerId);
-            mainWindow.webContents.send("room:host-changed", {
-              newHostPeerId: msg.nextHostPeerId,
-            });
-          }
-        }
-      });
-
-      client.on("disconnected", () => {
-        const activeRoom = roomManager.getActiveRoom();
-        if (activeRoom) {
-          roomManager.destroyRoom(activeRoom.roomId);
-          mainWindow.webContents.send("room:closed", {
-            roomId: activeRoom.roomId,
-            reason: "host-disconnected",
-          });
-        }
-        setWsClient(null);
-      });
-
       try {
-        await client.connect(hostIp, hostPort);
+        await bleManager.startScanning();
+
+        const members = await relayClient.joinRoom(roomId, selfPeer.peerId, selfPeer.displayName);
 
         const hostPeer: Peer = {
           peerId: hostPeerId,
           displayName: hostDisplayName,
-          ip: hostIp,
-          wsPort: hostPort,
           isHost: true,
         };
-        const room = roomManager.joinRoomAsGuest(
-          roomId,
-          hostPeer,
-          selfPeer,
-          hostPort
-        );
+
+        roomManager.joinRoomAsGuest(roomId, hostPeer, selfPeer, 0);
+
+        wireRelayEvents(roomId, roomManager, mainWindow);
 
         logger.info(`[RoomHandlers] Joined room: ${roomId}`);
+        mainWindow.webContents.send("room:joined", { roomId, hostPeerId, members });
+
         return { roomId, hostPeerId };
       } catch (err) {
-        client.disconnect();
-        setWsClient(null);
         logger.error("[RoomHandlers] Failed to join room", err);
         throw err;
       }
@@ -203,40 +154,18 @@ export function registerRoomHandlers(ctx: RoomContext) {
     const activeRoom = roomManager.getActiveRoom();
     if (!activeRoom) return;
 
-    const wsServer = ctx.wsServer;
-    const wsClient = ctx.wsClient;
+    relayClient.leave(selfPeer.peerId, activeRoom.roomId);
 
-    if (wsServer) {
-      // We are the host - migrate or close
-      const nextHost = roomManager.electNextHost(
-        activeRoom.roomId,
-        selfPeer.peerId
-      );
+    // Remove relay event listeners
+    relayClient.removeAllListeners("message");
+    relayClient.removeAllListeners("member-joined");
+    relayClient.removeAllListeners("member-left");
+    relayClient.removeAllListeners("disconnected");
 
-      if (nextHost) {
-        wsServer.sendToAll({
-          type: "host-migrating",
-          nextHostPeerId: nextHost,
-          roomId: activeRoom.roomId,
-        });
-      }
-
-      wsServer.close();
-      setWsServer(null);
-    }
-
-    if (wsClient) {
-      wsClient.send({
-        type: "leave",
-        peerId: selfPeer.peerId,
-        roomId: activeRoom.roomId,
-      });
-      wsClient.disconnect();
-      setWsClient(null);
-    }
+    bleManager.setRoomState("", false);
+    bleManager.stopScanning();
 
     roomManager.destroyRoom(activeRoom.roomId);
-    bleManager.setRoomState(0, false);
 
     mainWindow.webContents.send("room:closed", {
       roomId: activeRoom.roomId,
